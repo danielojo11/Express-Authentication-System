@@ -136,7 +136,7 @@ export const refresh = async (req, res) => {
   try {
     const token = req.cookies.refreshToken;
     if (!token) {
-      return res.status(401).jso({
+      return res.status(401).json({
         message: "No Refresh Token",
       });
     }
@@ -158,7 +158,7 @@ export const refresh = async (req, res) => {
       });
     }
 
-    const userResult = await pool.query("SELECT * FROM user s WHERE id = $1", [
+    const userResult = await pool.query("SELECT * FROM users WHERE id = $1", [
       session.user_id,
     ]);
     const newSessionId = crypto.randomUUID();
@@ -167,7 +167,7 @@ export const refresh = async (req, res) => {
     const newRefreshTokenHash = crypto
       .createHash("sha256")
       .update(newRefreshToken)
-      .digens("hex");
+      .digest("hex");
 
     await pool.query(
       `
@@ -194,7 +194,7 @@ export const refresh = async (req, res) => {
       [
         newSessionId,
         session.user_id,
-        newRefreshHash,
+        newRefreshTokenHash,
         session.user_agent,
         session.ip_address,
         session.device_name,

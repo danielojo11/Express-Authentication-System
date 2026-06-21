@@ -2,7 +2,7 @@ import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import pool from "../config/db.js";
 
-export const setupMFA = async (requestAnimationFrame, res) => {
+export const setupMFA = async (req, res) => {
   const secret = speakeasy.generateSecret({
     name: "Enterprise Auth App",
   });
