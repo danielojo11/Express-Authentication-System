@@ -2,32 +2,206 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 
 import pool from "../config/db.js";
-
-import {
-  generateAccessToken,
-  geneateRefreshToken,
-  verifyRefreshToken,
-} from "../utils/jwt.js";
+import { generateAccessToken, geneateRefreshToken, verifyRefreshToken } from "../utils/jwt.js";
 
 import { parsedevice } from "../utils/fingerprint.js";
-
 import { getGeoData } from "../utils/geo.js";
 import { detectSuspiciousLogin } from "../middleware/suspiciousLogin.js";
+import transporter from "../config/mail.js";
 
 export const register = async (req, res) => {
   try {
     const { name, email, password } = req.body;
+
+    const disposableDomains = [
+      "mailinator.com",
+      "10minutemail.com",
+      "tempmail.com",
+      "guerrillamail.com",
+      "yopmail.com",
+      "trashmail.com",
+    ];
+
+    if (!name || typeof name !== "string") {
+      return res.status(400).json({ message: "Invalid name" });
+    }
+
+    if (!email || typeof email !== "string") {
+      return res.status(400).json({ message: "Invalid email" });
+    }
+
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ message: "Invalid email format" });
+    }
+
+    const domain = email.split("@")[1].toLowerCase();
+    if (new Set(disposableDomains).has(domain)) {
+      return res.status(400).json({
+        message: "Disposable emails are not allowed",
+      });
+    }
+
     const hashedPassword = await bcrypt.hash(password, 12);
 
     const result = await pool.query(
-      "INSERT INTO users (name, email, password) VALUES ($1, $2, $3) RETURNING id, name, email",
+      `INSERT INTO users (name, email, password)
+       VALUES ($1, $2, $3)
+       RETURNING id, name, email`,
       [name, email, hashedPassword],
     );
 
-    res.status(201).json(result.rows[0]);
+    const user = result.rows[0];
+
+    await pool.query(
+      `INSERT INTO email_verification_token
+      (user_id, token, expires_at)
+      VALUES ($1, $2, NOW() + INTERVAL '30 minutes')`,
+      [user.email, hashedToken],
+    );
+
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+    const user_email = result.rows[0].email;
+    const hashedEmail = crypto.createHash("sha256").update(user_email).digest("hex");
+
+    const verificationURL = `${process.env.CLIENT_URL}/api/auth/verify-email?token=${rawToken}`;
+
+    await transporter.sendMail({
+      from: `"My App" <${process.env.SMTP_USER}>`,
+      to: user_email,
+      subject: "Verify your email address",
+      html: `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Verify your email</title>
+</head>
+
+<body style="margin:0;padding:0;background:#f4f7fb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 20px;background:#f4f7fb;">
+<tr>
+<td align="center">
+
+<table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.08);">
+
+<tr>
+<td style="background:#111827;padding:32px;text-align:center;">
+
+<h1 style="margin:0;color:#ffffff;font-size:28px;font-weight:700;">
+My App
+</h1>
+
+<p style="margin-top:10px;color:#cbd5e1;font-size:15px;">
+Secure Authentication Platform
+</p>
+
+</td>
+</tr>
+
+<tr>
+<td style="padding:48px;">
+
+<h2 style="margin-top:0;color:#111827;font-size:30px;">
+Verify your email
+</h2>
+
+<p style="font-size:16px;line-height:1.7;color:#4b5563;">
+Thanks for creating your account.
+To complete your registration and activate your account,
+please verify your email address.
+</p>
+
+<table cellpadding="0" cellspacing="0" style="margin:40px auto;">
+<tr>
+<td align="center">
+
+<a href="${verificationURL}"
+style="
+display:inline-block;
+padding:16px 34px;
+background:#2563eb;
+color:#ffffff;
+text-decoration:none;
+font-size:16px;
+font-weight:600;
+border-radius:10px;
+">
+Verify Email
+</a>
+
+</td>
+</tr>
+</table>
+
+<p style="font-size:15px;color:#6b7280;line-height:1.7;">
+This verification link expires in
+<strong>30 minutes</strong>.
+</p>
+
+<p style="font-size:15px;color:#6b7280;line-height:1.7;">
+If the button doesn't work, copy and paste this URL into your browser:
+</p>
+
+<p style="
+word-break:break-all;
+background:#f3f4f6;
+padding:16px;
+border-radius:8px;
+font-size:14px;
+color:#2563eb;
+">
+${verificationURL}
+</p>
+
+<hr style="margin:40px 0;border:none;border-top:1px solid #e5e7eb;">
+
+<p style="font-size:14px;color:#6b7280;line-height:1.7;">
+If you didn't create an account with My App,
+you can safely ignore this email.
+No account will be created unless this email is verified.
+</p>
+
+</td>
+</tr>
+
+<tr>
+<td style="background:#f9fafb;padding:30px;text-align:center;">
+
+<p style="margin:0;font-size:13px;color:#9ca3af;">
+© ${new Date().getFullYear()} My App. All rights reserved.
+</p>
+
+<p style="margin-top:10px;font-size:13px;color:#9ca3af;">
+Built with security and privacy in mind.
+</p>
+
+</td>
+</tr>
+
+</table>
+
+</td>
+</tr>
+</table>
+
+</body>
+</html>
+`,
+    });
+
+    return res.status(201).json({
+      message: "User created. Please verify your email.",
+      user,
+    });
   } catch (error) {
-    res.status(500).json({
-      message: `${error.message}+++`,
+    console.error(error);
+    return res.status(500).json({
+      message: error.message,
     });
   }
 };
@@ -35,65 +209,50 @@ export const register = async (req, res) => {
 export const login = async (req, res) => {
   try {
     const { email, password, mfaToken } = req.body;
-    const userResult = await pool.query(
-      "SELECT * FROM users WHERE email = $1",
-      [email],
-    );
+
+    const userResult = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+
     const user = userResult.rows[0];
 
     if (!user) {
-      return res.status(401).json({
-        message: "Invalid Credentials",
-      });
+      return res.status(401).json({ message: "Invalid credentials" });
     }
 
     const validPassword = await bcrypt.compare(password, user.password);
 
     if (!validPassword) {
-      return res.status(401).json({ message: "Invalid Credentials" });
-    }
-
-    if (user.mfa_enabled) {
-      const speakeasy = await import("speakeasy");
-
-      const verified = speakeasy.default.totp.verify({
-        secret: user.mfa_secret,
-        encoding: "base32",
-        token: mfaToken,
-      });
-
-      if (!verified) {
-        return res.status(401).json({
-          message: "Invalid MFA Code",
-        });
-      }
+      return res.status(401).json({ message: "Invalid credentials" });
     }
 
     const device = parsedevice(req);
     const ip = req.ip;
     const geo = getGeoData(ip);
 
-    const suspicious = await detectSuspiciousLogin({
+    await detectSuspiciousLogin({
       userId: user.id,
       country: geo.country,
       ip,
     });
 
-    if (suspicious) {
-      console.log("Suspicious Login Detected");
-    }
-
     const sessionId = crypto.randomUUID();
 
     const refreshToken = geneateRefreshToken(sessionId);
 
-    const refreshTokenHash = crypto
-      .createHash("sha256")
-      .update(refreshToken)
-      .digest("hex");
+    const refreshTokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
 
     await pool.query(
-      "INSERT INTO sessions (id, user_id, refresh_token_hash, user_agent, ip_address, device_name, browser, os, country, city, expires_at, is_current) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, NOW() + INTERVAL '7 days', true)",
+      `INSERT INTO sessions (
+        id, user_id, refresh_token_hash,
+        user_agent, ip_address,
+        device_name, browser, os,
+        country, city,
+        expires_at, is_current
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+        NOW() + INTERVAL '7 days',
+        true
+      )`,
       [
         sessionId,
         user.id,
@@ -113,7 +272,14 @@ export const login = async (req, res) => {
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       secure: false,
-      sameSite: "none",
+      sameSite: "lax",
+      maxAge: 1000 * 60 * 60 * 24 * 7,
+    });
+
+    res.cookie("sessionId", sessionId, {
+      httpOnly: true,
+      secure: false,
+      sameSite: "lax",
       maxAge: 1000 * 60 * 60 * 24 * 7,
     });
 
@@ -125,9 +291,9 @@ export const login = async (req, res) => {
       },
     });
   } catch (error) {
-    console.log(error);
+    console.error(error);
     return res.status(500).json({
-      message: `${error.message}---`,
+      message: error.message,
     });
   }
 };
@@ -135,10 +301,9 @@ export const login = async (req, res) => {
 export const refresh = async (req, res) => {
   try {
     const token = req.cookies.refreshToken;
+
     if (!token) {
-      return res.status(401).json({
-        message: "No Refresh Token",
-      });
+      return res.status(401).json({ message: "No refresh token" });
     }
 
     const decoded = verifyRefreshToken(token);
@@ -146,51 +311,40 @@ export const refresh = async (req, res) => {
     const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
     const sessionResult = await pool.query(
-      "SELECT * FROM sessions WHERE id = $1 AND refresh_token_hash = $2 AND revoked = false",
+      `SELECT * FROM sessions
+       WHERE id = $1 AND refresh_token_hash = $2 AND revoked = false`,
       [decoded.sessionId, hashedToken],
     );
 
     const session = sessionResult.rows[0];
 
     if (!session) {
-      return res.status(401).json({
-        message: "Invalid Session",
-      });
+      return res.status(401).json({ message: "Invalid session" });
     }
 
-    const userResult = await pool.query("SELECT * FROM users WHERE id = $1", [
-      session.user_id,
-    ]);
+    const userResult = await pool.query("SELECT * FROM users WHERE id = $1", [session.user_id]);
+
+    const user = userResult.rows[0];
+
     const newSessionId = crypto.randomUUID();
+
     const newRefreshToken = geneateRefreshToken(newSessionId);
 
-    const newRefreshTokenHash = crypto
-      .createHash("sha256")
-      .update(newRefreshToken)
-      .digest("hex");
+    const newRefreshTokenHash = crypto.createHash("sha256").update(newRefreshToken).digest("hex");
 
     await pool.query(
-      `
-      INSERT INTO sessions (
-        id,
-        user_id,
-        refresh_token_hash,
-        user_agent,
-        ip_address,
-        device_name,
-        browser,
-        os,
-        country,
-        city,
-        expires_at,
-        is_current
+      `INSERT INTO sessions (
+        id, user_id, refresh_token_hash,
+        user_agent, ip_address,
+        device_name, browser, os,
+        country, city,
+        expires_at, is_current
       )
       VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
         NOW() + INTERVAL '7 days',
         true
-      )
-    `,
+      )`,
       [
         newSessionId,
         session.user_id,
@@ -207,19 +361,17 @@ export const refresh = async (req, res) => {
 
     const accessToken = generateAccessToken(user);
 
-    res.cookie("refreshToken", newRefreshTOken, {
+    res.cookie("refreshToken", newRefreshToken, {
       httpOnly: true,
       secure: false,
-      sameSite: "none",
+      sameSite: "lax",
       maxAge: 1000 * 60 * 60 * 24 * 7,
     });
 
-    res.json({
-      accessToken,
-    });
+    return res.json({ accessToken });
   } catch (error) {
-    res.status(401).json({
-      message: "Refresh Failed",
+    return res.status(401).json({
+      message: "Refresh failed",
     });
   }
 };
@@ -227,22 +379,18 @@ export const refresh = async (req, res) => {
 export const logout = async (req, res) => {
   const token = req.cookies.refreshToken;
 
-  if (!token) {
-    return res.sendStatus(204);
-  }
+  if (!token) return res.sendStatus(204);
 
   try {
     const decoded = verifyRefreshToken(token);
 
-    await pool.query("UPDATE sessions SET revoked = true WHERE id = $1", [
-      decoded.sessionId,
-    ]);
+    await pool.query("UPDATE sessions SET revoked = true WHERE id = $1", [decoded.sessionId]);
 
     res.clearCookie("refreshToken");
-    res.json({
-      message: "Logged Out",
-    });
+    res.clearCookie("sessionId");
+
+    return res.json({ message: "Logged out" });
   } catch (error) {
-    res.sendStatus(204);
+    return res.sendStatus(204);
   }
 };
