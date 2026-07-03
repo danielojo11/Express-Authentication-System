@@ -11,11 +11,18 @@ export const getSessions = async (req, res) => {
 export const revokeSession = async (req, res) => {
   const { sessionsId } = req.params;
 
-  await pool.query(
-    "UPDATE sessions SET revoked = true WHERE id = $1 AND user_id = $2",
-    [sessionsId, req.user.id],
-  );
+  await pool.query("UPDATE sessions SET revoked = true WHERE id = $1 AND user_id = $2", [
+    sessionsId,
+    req.user.id,
+  ]);
   res.json({
     message: "Session Revoked",
+  });
+};
+
+export const revokeAllSessions = async (req, res) => {
+  await pool.query("UPDATE sessions SET revoked = true WHERE user_id = $1", [req.user.id]);
+  res.status(200).json({
+    message: "All Sessions Revoked",
   });
 };

@@ -11,6 +11,9 @@ export const protect = (req, res, next) => {
     const token = authHeader.split(" ")[1];
 
     const decoded = verifyAccessToken(token);
+    if (decoded.type !== "access") {
+      return res.status(401).json({ message: "Invalid Token Type. Access Denied" });
+    }
 
     req.user = decoded;
     next();

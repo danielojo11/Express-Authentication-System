@@ -2,12 +2,21 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 
 import pool from "../config/db.js";
-import { generateAccessToken, geneateRefreshToken, verifyRefreshToken } from "../utils/jwt.js";
+import {
+  generateAccessToken,
+  geneateRefreshToken,
+  verifyRefreshToken,
+  verifyAccessToken,
+} from "../utils/jwt.js";
 
 import { parsedevice } from "../utils/fingerprint.js";
 import { getGeoData } from "../utils/geo.js";
 import { detectSuspiciousLogin } from "../middleware/suspiciousLogin.js";
 import transporter from "../config/mail.js";
+import { generateQRCode } from "../utils/qrcode.js";
+
+import speakeasy from "speakeasy";
+import fs from "fs/promises";
 
 export const register = async (req, res) => {
   try {
@@ -58,7 +67,7 @@ export const register = async (req, res) => {
       `INSERT INTO email_verification_token
       (user_id, token, expires_at)
       VALUES ($1, $2, NOW() + INTERVAL '30 minutes')`,
-      [user.email, hashedToken],
+      [user.id, hashedToken],
     );
 
     const rawToken = crypto.randomBytes(32).toString("hex");
@@ -234,6 +243,15 @@ export const login = async (req, res) => {
       ip,
     });
 
+    if (user.mfa_enabled && !mfaToken) {
+      const loginToken = generateAccessToken(user, { expiresIn: "5m" }, "login");
+      return res.status(301).json({
+        message: "MFA token required. Redirect to the MFA verification page.",
+        loginToken: loginToken,
+        // url: `${process.env.CLIENT_URL}/mfa-verify`,
+      });
+    }
+
     const sessionId = crypto.randomUUID();
 
     const refreshToken = geneateRefreshToken(sessionId);
@@ -392,5 +410,188 @@ export const logout = async (req, res) => {
     return res.json({ message: "Logged out" });
   } catch (error) {
     return res.sendStatus(204);
+  }
+};
+
+export const setupMFA = async (req, res) => {
+  try {
+    const authorization = req.headers.authorization;
+
+    if (!authorization) {
+      return res.status(401).json({
+        message: "Unauthorized",
+      });
+    }
+
+    const accessToken = authorization.split(" ")[1];
+
+    const payload = verifyAccessToken(accessToken);
+    console.log("payload", payload);
+
+    const userResult = await pool.query("SELECT * FROM users WHERE id = $1", [payload.id]);
+
+    const user = userResult.rows[0];
+    console.log("user", user);
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    if (user.mfa_enabled) {
+      return res.status(400).json({
+        message: "MFA already enabled",
+      });
+    }
+
+    const secret = speakeasy.generateSecret({
+      length: 20,
+    });
+
+    await pool.query("UPDATE users SET mfa_secret = $1 WHERE id = $2", [secret.base32, user.id]);
+
+    const qrCode = await generateQRCode("Auth System", user.email, secret.base32);
+
+    await fs.writeFile("qrcode.png", qrCode.replace(/^data:image\/png;base64,/, ""), "base64");
+
+    return res.status(200).json({
+      qrCode,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Failed to setup MFA",
+    });
+  }
+};
+
+export const verifyMFA = async (req, res) => {
+  try {
+    const authorization = req.headers.authorization;
+    const { token, loginToken } = req.body;
+
+    // if (!authorization) {
+    //   return res.status(401).json({ message: "Unauthorized" });
+    // }
+
+    if (!token) {
+      return res.status(400).json({ message: "MFA code required" });
+    }
+
+    // const accessToken = authorization.split(" ")[1];
+    const payload = verifyAccessToken(loginToken);
+
+    const result = await pool.query("SELECT * FROM users WHERE email = $1", [payload.email]);
+
+    const user = result.rows[0];
+
+    if (payload.type === "login") {
+      const sessionId = crypto.randomUUID();
+
+      const refreshToken = geneateRefreshToken(sessionId);
+
+      const refreshTokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
+
+      const device = parsedevice(req);
+      const ip = req.ip;
+      const geo = getGeoData(ip);
+
+      await pool.query(
+        `INSERT INTO sessions (
+        id, user_id, refresh_token_hash,
+        user_agent, ip_address,
+        device_name, browser, os,
+        country, city,
+        expires_at, is_current
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+        NOW() + INTERVAL '7 days',
+        true
+      )`,
+        [
+          sessionId,
+          user.id,
+          refreshTokenHash,
+          device.useragent,
+          ip,
+          device.device,
+          device.browser,
+          device.os,
+          geo.country,
+          geo.city,
+        ],
+      );
+
+      const accessToken = generateAccessToken(user);
+
+      res.cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+        secure: false,
+        sameSite: "lax",
+        maxAge: 1000 * 60 * 60 * 24 * 7,
+      });
+
+      res.cookie("sessionId", sessionId, {
+        httpOnly: true,
+        secure: false,
+        sameSite: "lax",
+        maxAge: 1000 * 60 * 60 * 24 * 7,
+      });
+
+      return res.json({
+        accessToken,
+        user: {
+          id: user.id,
+          email: user.email,
+        },
+      });
+      return res.status(200).json({
+        message: "MFA verified successfully. User Logged in",
+      });
+    }
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (!user.mfa_secret) {
+      return res.status(400).json({
+        message: "MFA has not been setup.",
+      });
+    }
+
+    const verified = speakeasy.totp.verify({
+      secret: user.mfa_secret,
+      encoding: "base32",
+      token,
+      window: 1,
+    });
+
+    if (!verified) {
+      return res.status(400).json({
+        message: "Invalid MFA code",
+      });
+    }
+
+    await pool.query(
+      `UPDATE users
+       SET mfa_enabled = true,
+           mfa_enabled_at = NOW(),
+           mfa_verified_at = NOW()
+       WHERE id = $1`,
+      [user.id],
+    );
+
+    return res.status(200).json({
+      message: "MFA enabled successfully",
+      mfaEnabled: true,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: error.message,
+    });
   }
 };
