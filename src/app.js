@@ -18,12 +18,12 @@ const app = express();
 
 const PgSession = connectPgSimple(session);
 app.use(helmet());
-// app.use(
-//     cors({
-//         origin: "*",
-//         credentials: false
-//     })
-// )
+app.use(
+  cors({
+    origin: "*",
+    credentials: false,
+  }),
+);
 
 app.use(express.json());
 app.use(cookieParser());
