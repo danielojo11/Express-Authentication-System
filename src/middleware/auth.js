@@ -4,7 +4,7 @@ export const protect = (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    if (!authHeader) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
@@ -19,5 +19,6 @@ export const protect = (req, res, next) => {
     next();
   } catch (error) {
     return res.status(401).json({ message: "Invalid Token" });
+    next(error);
   }
 };

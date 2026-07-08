@@ -62,6 +62,10 @@ export const register = async (req, res) => {
     );
 
     const user = result.rows[0];
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const user_email = result.rows[0].email;
+    const hashedEmail = crypto.createHash("sha256").update(user_email).digest("hex");
+    const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
 
     await pool.query(
       `INSERT INTO email_verification_token
@@ -69,11 +73,6 @@ export const register = async (req, res) => {
       VALUES ($1, $2, NOW() + INTERVAL '30 minutes')`,
       [user.id, hashedToken],
     );
-
-    const rawToken = crypto.randomBytes(32).toString("hex");
-    const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
-    const user_email = result.rows[0].email;
-    const hashedEmail = crypto.createHash("sha256").update(user_email).digest("hex");
 
     const verificationURL = `${process.env.CLIENT_URL}/api/auth/verify-email?token=${rawToken}`;
 
@@ -306,6 +305,8 @@ export const login = async (req, res) => {
       user: {
         id: user.id,
         email: user.email,
+        name: user.name,
+        mfa_enabled: user.mfa_enabled,
       },
     });
   } catch (error) {
@@ -453,7 +454,7 @@ export const setupMFA = async (req, res) => {
 
     const qrCode = await generateQRCode("Auth System", user.email, secret.base32);
 
-    await fs.writeFile("qrcode.png", qrCode.replace(/^data:image\/png;base64,/, ""), "base64");
+    // await fs.writeFile("qrcode.png", qrCode.replace(/^data:image\/png;base64,/, ""), "base64");
 
     return res.status(200).json({
       qrCode,
@@ -546,6 +547,8 @@ export const verifyMFA = async (req, res) => {
         user: {
           id: user.id,
           email: user.email,
+          name: user.name,
+          mfa_enabled: user.mfa_enabled,
         },
       });
       return res.status(200).json({
@@ -594,4 +597,145 @@ export const verifyMFA = async (req, res) => {
       message: error.message,
     });
   }
+};
+
+export const disableMFA = async (req, res) => {
+  try {
+    const authorization = req.headers.authorization;
+    const { token } = req.body;
+
+    if (!authorization) {
+      return res.status(401).json({
+        message: "Unauthorized",
+      });
+    }
+
+    const accessToken = authorization.split(" ")[1];
+
+    const payload = verifyAccessToken(accessToken);
+    const result = await pool.query("SELECT * FROM users WHERE email = $1", [payload.email]);
+    const user = result.rows[0];
+
+    if (!user.mfa_enabled) {
+      return res.status(400).json({
+        message: "MFA has not been setup.",
+      });
+    }
+
+    const verified = speakeasy.totp.verify({
+      secret: user.mfa_secret,
+      encoding: "base32",
+      token,
+      window: 1,
+    });
+
+    if (!verified) {
+      return res.status(400).json({
+        message: "Invalid MFA code",
+      });
+    }
+
+    await pool.query(
+      `UPDATE users
+       SET mfa_enabled = false,
+           mfa_secret = null,
+           mfa_enabled_at = null,
+           mfa_verified_at = null
+       WHERE id = $1`,
+      [user.id],
+    );
+    return res.status(200).json({
+      message: "MFA disabled successfully",
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      message: error.message,
+    });
+  }
+};
+
+export const updatePassword = async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  const authorization = req.headers.authorization;
+  const token = authorization.split(" ")[1];
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({
+      message: "Current and new password are required",
+    });
+  }
+
+  if (currentPassword === newPassword) {
+    return res.status(400).json({
+      message: "New password cannot be the same as the current password",
+    });
+  }
+
+  const user = verifyAccessToken(token);
+  const userEmail = user.email;
+  const currentPasswordhash = await bcrypt.hash(currentPassword, 12);
+
+  const result = await pool.query("SELECT * FROM users WHERE email = $1", [userEmail]);
+  const dbUser = result.rows[0];
+
+  const isPasswordSame = await bcrypt.compare(currentPassword, dbUser.password);
+
+  if (!isPasswordSame) {
+    return res.status(400).json({
+      message: "Current password is incorrect",
+    });
+  }
+
+  const newPasswordHash = await bcrypt.hash(newPassword, 12);
+
+  const updatePassword = await pool.query("UPDATE users SET password = $1 WHERE email = $2", [
+    newPasswordHash,
+    userEmail,
+  ]);
+
+  return res.status(200).json({
+    message: "Password Updated Successfully",
+  });
+};
+
+export const updateUser = async (req, res) => {
+  const { name, email, bio } = req.body;
+  const authorization = req.headers.authorization;
+  const token = authorization.split(" ")[1];
+
+  const user = verifyAccessToken(token);
+  const userEmail = user.email;
+
+  if (name === user.name && email === user.email && bio === user.bio) {
+    return res.status(400).json({
+      message: "No changes to update",
+    });
+  }
+
+  const update = {};
+  if (email && email !== user.email) {
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        message: "Invalid email format",
+      });
+    }
+    update.email = email;
+  }
+  if (name && name !== user.name) {
+    update.name = name;
+  }
+  if (bio && bio !== user.bio) {
+    update.bio = bio;
+  }
+
+  const result = await pool.query(
+    "UPDATE users SET name = $1, email = $2, bio = $3 WHERE email = $4 RETURNING *",
+    [update.name || user.name, update.email || user.email, update.bio || user.bio, userEmail],
+  );
+
+  return res.status(200).json({
+    message: "User updated successfully",
+  });
 };
