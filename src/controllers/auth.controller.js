@@ -739,3 +739,32 @@ export const updateUser = async (req, res) => {
     message: "User updated successfully",
   });
 };
+
+export const deleteUser = async (req, res) => {
+  try {
+    const authorization = req.headers.authorization;
+    if (!authorization) {
+      return res.status(401).json({
+        message: "Unauthorized",
+      });
+    }
+    const token = authorization.split(" ")[1];
+    const verifiedToken = verifyAccessToken(token);
+    if (!verifiedToken) {
+      return res.status(401).json({
+        message: "Unauthorized",
+      });
+    }
+    const userEmail = verifiedToken.email;
+
+    const result = await pool.query("DELETE FROM users WHERE email = $1", [userEmail]);
+
+    return res.status(200).json({
+      message: "User deleted successfully",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Internal Server Error",
+    });
+  }
+};
