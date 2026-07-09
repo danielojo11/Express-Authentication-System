@@ -42,11 +42,11 @@ export const register = async (req, res) => {
     const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
     if (!emailRegex.test(email)) {
-      return res.status(400).json({ message: "Invalid email format" });
+      return res.status(400).json({ message: "Invalid email " });
     }
 
     const domain = email.split("@")[1].toLowerCase();
-    if (new Set(disposableDomains).has(domain)) {
+    if (disposableDomains.includes(domain)) {
       return res.status(400).json({
         message: "Disposable emails are not allowed",
       });
@@ -64,7 +64,6 @@ export const register = async (req, res) => {
     const user = result.rows[0];
     const rawToken = crypto.randomBytes(32).toString("hex");
     const user_email = result.rows[0].email;
-    const hashedEmail = crypto.createHash("sha256").update(user_email).digest("hex");
     const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
 
     await pool.query(
