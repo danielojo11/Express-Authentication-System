@@ -16,7 +16,6 @@ import transporter from "../config/mail.js";
 import { generateQRCode } from "../utils/qrcode.js";
 
 import speakeasy from "speakeasy";
-import fs from "fs/promises";
 
 export const register = async (req, res) => {
   try {
@@ -308,18 +307,17 @@ export const login = async (req, res) => {
     const ip = req.ip;
     const geo = getGeoData(ip);
 
-    await detectSuspiciousLogin({
-      userId: user.id,
-      country: geo.country,
-      ip,
-    });
+    // await detectSuspiciousLogin({
+    //   userId: user.id,
+    //   country: geo.country,
+    //   ip,
+    // });
 
     if (user.mfa_enabled && !mfaToken) {
       const loginToken = generateAccessToken(user, { expiresIn: "5m" }, "login");
       return res.status(301).json({
         message: "MFA token required. Redirect to the MFA verification page.",
         loginToken: loginToken,
-        // url: `${process.env.CLIENT_URL}/mfa-verify`,
       });
     }
 
