@@ -10,6 +10,10 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-await transporter.verify();
-
+try {
+  await transporter.verify();
+  console.log("SMTP Connection verified successfully.");
+} catch (error) {
+  console.warn("SMTP Verification failed (Email features may not work):", error.message);
+}
 export default transporter;
