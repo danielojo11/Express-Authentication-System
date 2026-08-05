@@ -10,6 +10,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --only=production
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/docs ./docs
 
 EXPOSE 3000
 CMD ["node", "dist/server.js"]
