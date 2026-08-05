@@ -6,6 +6,9 @@ import session from "express-session";
 import { RedisStore } from "connect-redis";
 import Redis from "ioredis";
 import dotenv from "dotenv";
+import swaggerUi from "swagger-ui-express";
+import YAML from "yamljs";
+import path from "path";
 
 import pool from "./config/db.js";
 
@@ -54,6 +57,9 @@ import { errorHandler } from "./middleware/errorHandler.js";
 app.use("/api/auth", authRoutes);
 app.use("/api/sessions", sesssionRoutes);
 app.use("/api/oauth", oauthRoutes);
+
+const swaggerDocument = YAML.load(path.join(process.cwd(), "docs/swagger.yml"));
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 app.use(errorHandler);
 
