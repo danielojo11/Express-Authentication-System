@@ -7,10 +7,7 @@ export const setupMFA = async (req, res) => {
     name: "Enterprise Auth App",
   });
 
-  await pool.query("UPDATE users SET mfa_secret = $1 WHERE id = $2", [
-    secret.base32,
-    req.user.id,
-  ]);
+  await pool.query("UPDATE users SET mfa_secret = $1 WHERE id = $2", [secret.base32, req.user.id]);
 
   const qr = await QRCode.toDataURL(secret.otpauth_url);
 

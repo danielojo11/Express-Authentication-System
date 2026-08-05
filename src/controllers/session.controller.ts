@@ -3,20 +3,12 @@ import { verifyAccessToken } from "../utils/jwt.js";
 
 export const getSessions = async (req, res) => {
   try {
-    const authorization = req.headers.authorization;
-    console.log(authorization);
-    if (!authorization) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-    const token = authorization.split(" ")[1];
-    const user = verifyAccessToken(token);
-    console.log(user);
-    if (!user) {
+    if (!req.user) {
       return res.status(401).json({ message: "Unauthorized" });
     }
     const result = await pool.query(
       "SELECT id, browser, os, country, city, ip_address, created_at, last_used_at, revoked FROM sessions WHERE user_id = $1 ORDER BY created_at DESC",
-      [user.id],
+      [req.user.id],
     );
     console.log(result.rows);
     res.status(200).json(result.rows);

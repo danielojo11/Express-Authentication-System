@@ -3,7 +3,8 @@ import cors from "cors";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import session from "express-session";
-import connectPgSimple from "connect-pg-simple";
+import { RedisStore } from "connect-redis";
+import Redis from "ioredis";
 import dotenv from "dotenv";
 
 import pool from "./config/db.js";
@@ -16,7 +17,9 @@ dotenv.config();
 
 const app = express();
 
-const PgSession = connectPgSimple(session);
+const RedisClient: any = Redis;
+const redisClient = new RedisClient(process.env.REDIS_URL || "redis://localhost:6379");
+
 app.use(helmet());
 app.use(
   cors({
@@ -30,27 +33,28 @@ app.use(cookieParser());
 
 app.use(
   session({
-    store: new PgSession({
-      pool,
-      tableName: "user_sesssions",
+    store: new RedisStore({
+      client: redisClient,
+      prefix: "sess:",
     }),
-
-    secret: process.env.SESSION_SECRET,
-
+    secret: process.env.SESSION_SECRET || "fallback_secret",
     resave: false,
     saveUninitialized: false,
-
     cookie: {
       httpOnly: true,
-      secure: false,
-      sameSite: "none",
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
       maxAge: 1000 * 60 * 60 * 24,
     },
   }),
 );
 
+import { errorHandler } from "./middleware/errorHandler.js";
+
 app.use("/api/auth", authRoutes);
 app.use("/api/sessions", sesssionRoutes);
 app.use("/api/oauth", oauthRoutes);
+
+app.use(errorHandler);
 
 export default app;

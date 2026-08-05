@@ -20,7 +20,8 @@
     "qrcode": "^1.5.4",
     "speakeasy": "^2.0.0",
     "useragent": "^2.3.0",
-    "uuid": "^14.0.1"
+    "uuid": "^14.0.1",
+    "zod": "^4.4.3"
   },
   "type": "module",
   "name": "inkit-prac",
@@ -28,8 +29,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "node --watch ./src/server.js"
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test": "cross-env NODE_ENV=test jest",
+    "dev": "ts-node-dev --respawn --transpile-only ./src/server.ts"
   },
   "repository": {
     "type": "git",
@@ -41,5 +44,19 @@
   "bugs": {
     "url": "https://github.com/danielojo11/Express-Authentication-System/issues"
   },
-  "homepage": "https://github.com/danielojo11/Express-Authentication-System#readme"
+  "homepage": "https://github.com/danielojo11/Express-Authentication-System#readme",
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^26.1.2",
+    "@types/passport": "^1.0.17",
+    "@types/passport-google-oauth20": "^2.0.17",
+    "connect-redis": "^10.0.0",
+    "ioredis": "^6.0.0",
+    "rate-limit-redis": "^6.0.1",
+    "typescript": "^7.0.2"
+  }
 }
